@@ -7,15 +7,19 @@ from torch.nn import functional as F
 import torch.optim as optim
 import numpy as np
 import time
+from tqdm import tqdm
+import math
+
 
 torch.manual_seed(1337)
 # Larger batch size is faster (when using gpu at least)
 val_pct = 0.1
 batch_size = 128 # Number of independent sequences yt process in parallel
 block_size = 8 # Maximum context length for the predictions 
-learning_rate = 0.0005
+learning_rate = 0.0003
 num_epochs = 3
 device = "cpu" # cuda, mps, or cpu
+n_embed = 32
 
 
 
@@ -72,15 +76,15 @@ def get_batch(split, train_data, val_data): # train or validation split
     return x, y
 
 
-
-
 class BigramLanguageModel(nn.Module):
     
     def __init__(self, vocab_size):
         super().__init__()
         # each token directly reads off the logits for the next token from a lookup table
-        self.token_embedding_table = nn.Embedding(vocab_size, vocab_size)
-    
+        self.token_embedding_table = nn.Embedding(vocab_size, n_embed)
+        self.position_embedding_table = nn.Embedding(block_size, n_embed)
+        self.lm_head = nn.Linear(n_embed, vocab_size)
+
     def forward(self, idx, targets=None):
         """ Forward pass. 
         
@@ -88,10 +92,18 @@ class BigramLanguageModel(nn.Module):
         directly as an input into softmax to create an array of probabilities.  So the 
         embedding dimension must be equal to the vocab size since the emedding values itself
         are just the predictions.  So the model is taking each character and determining what
-        the most likely next character is, trained of the offset by one x and y values."""
+        the most likely next character is, trained on the offset by one x and y values."""
         # idx and targets are both (B, T) tensor of integers
         # We are ONLY using the embedding as the logits directly.  
-        logits = self.token_embedding_table(idx)  # (B,T,C) - (Batch (4), Time (8), Channel(65))
+
+        B, T = idx.shape
+
+        # Add a linear layer to go from togken embeddings to logist now
+        token_embeddings = self.token_embedding_table(idx)  # (B,T,C) - (Batch (4), Time (8), Channel(n_embed))
+        position_embeddings = self.position_embedding_table(torch.arange(T, device = device)) # (T,C)
+        # Add position and token embeddings together (broadcasted over batches)
+        x = token_embeddings + position_embeddings # (B,T,C)
+        logits = self.lm_head(x) # (B,T,vocab_size)
         
         # Evaluate the loss (compare logits to the next character (targets))
         if targets == None:
@@ -106,19 +118,24 @@ class BigramLanguageModel(nn.Module):
     
     def generate(self, idx, max_new_tokens):
         """Generate new tokens on top of the existing T tokens."""
+        idx_output = idx
         for _ in range(max_new_tokens):
-            # Use the forward step to get predictions
-            logits, loss = self(idx)  # Don't need loss
-            # Focus only on the last time step - this is what comes next actually.  
-            logits = logits[:, -1, :]  # becomes (B, C)
-            # Use softmax to get the probabilities
-            probs = F.softmax(logits, dim=-1)
-            # Sample from the distribution (we pick a random next character but weighted by modeled probability)
-            idx_next = torch.multinomial(probs, num_samples=1)
+            # get the predictions
+            logits, loss = self(idx)
+            # focus only on the last time step
+            logits = logits[:, -1, :] # becomes (B, C)
+            # apply softmax to get probabilities
+            probs = F.softmax(logits, dim=-1) # (B, C)
+            # sample from the distribution
+            idx_next = torch.multinomial(probs, num_samples=1) # (B, 1)
             # append sampled index to the running sequence
             idx = torch.cat((idx, idx_next), dim=1) # (B, T+1)
+            # Keep the maximum to the block size (for position encodings)
+            if idx.shape[1] > block_size:
+                idx = idx[:, -block_size:]
+            idx_output = torch.cat((idx_output, idx_next), dim=1) # (B, T+1)
         
-        return idx
+        return idx_output
 
 
 def get_optimization_details(model):
@@ -131,6 +148,7 @@ def get_optimization_details(model):
     return optimizer, scheduler
 
 
+
 def train(model, train_data, val_data):
 
     # Set up the model and optimizer
@@ -140,12 +158,19 @@ def train(model, train_data, val_data):
 
     optimizer, scheduler = get_optimization_details(model)
 
+    # Note we use math.ceil for cases where the data to batch size division isn't a clean number
+    n_steps = math.ceil(len(train_data)/batch_size)
+
     # Iterate through epochs
     for epoch in range(num_epochs):
         
         start_time = time.time()
         print(f"Current learning rate: {optimizer.param_groups[0]['lr']:.6f}")
         model.train()
+
+        # initialize tqdm object
+        progress_bar = tqdm(total=n_steps, desc=f"Epoch {epoch+1}/{num_epochs}")
+
         batch_losses = []
         
         # Iterate through batches
@@ -157,6 +182,10 @@ def train(model, train_data, val_data):
             logits, loss = model(xb, yb)
             
             batch_losses.append(loss.item())
+            
+            # update progress bar
+            progress_bar.update(1)
+            progress_bar.set_postfix(loss=loss.item(), lr=optimizer.param_groups[0]['lr'])
 
             # Backward pass 
             loss.backward()
@@ -176,7 +205,7 @@ def train(model, train_data, val_data):
         end_time = time.time()
         epoch_time = end_time - start_time
         print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {total_loss:.4f}, Execution time: {epoch_time:.4f}")
-
+        progress_bar.close()
 
 def main():
     """ Main entry point of the app."""
