@@ -14,21 +14,18 @@ import math
 torch.manual_seed(1337)
 # Larger batch size is faster (when using gpu at least)
 val_pct = 0.1
-batch_size = 128 # Number of independent sequences yt process in parallel
-block_size = 8 # Maximum context length for the predictions 
-learning_rate = 0.0003
-num_epochs = 3
+batch_size = 64 # Number of independent sequences yt process in parallel
+block_size = 16 # Maximum context length for the predictions 
+learning_rate = 0.00002
+lr_decay = 0.75
+num_epochs = 12
 device = "cpu" # cuda, mps, or cpu
 n_embed = 32
-
 
 
 torch.manual_seed(1337)
 batch_size = 4  # Number of independent sequences yt process in parallel
 block_size = 8  # Maximum context length for the predictions 
-
-
-# create a mapping from characters to integers and back
 
 
 # Simple encoder and decoder functions
@@ -76,6 +73,54 @@ def get_batch(split, train_data, val_data): # train or validation split
     return x, y
 
 
+class TransformerBlock(nn.Module):
+    """Transformer block."""
+    def __init__(self, n_embed):
+        super().__init__()
+        self.wQ, self.wK, self.wV = self.initialize_weights(n_embed)
+
+        self.query = nn.Linear(n_embed, n_embed, bias=False)
+        self.key = nn.Linear(n_embed, n_embed, bias=False)
+        self.value = nn.Linear(n_embed, n_embed, bias=False)
+
+        self.register_buffer('tril', torch.tril(torch.ones((block_size, block_size))))
+    
+    def forward(self, X):
+        """Take in a 2 or 3d tensor and calculate output embeddings.
+        
+        :param X: pytorch tensor with dims (B, T, C) or (T, C)
+        """
+        
+        B, T, C = X.shape
+
+        # Create the query, key, and value matrices
+        Q = self.query(X)
+        K = self.key(X)
+        V = self.value(X)
+
+        # Take the dot product with each previous matrix
+        
+        xdot = (Q @ torch.transpose(K, -2, -1)).masked_fill(self.tril[:T, :T] == 0, float('-inf'))
+        
+        # Normalize by the square root of the input dim
+        xdot = xdot/math.sqrt(X.shape[-1])
+        
+        # Softmax to get weights of each previous element 
+        alpha = F.softmax(xdot, dim=1)
+        
+        # Multiply by X again to get a matrix with Y (each row is dim C)
+        Y = alpha @ V
+        return Y
+
+    def initialize_weights(self, C):
+        """Create the traininable weight matrices for the query, key and value projections."""
+        wQ = torch.rand(C, C, requires_grad=True)
+        wK = torch.rand(C, C, requires_grad=True)
+        wV = torch.rand(C, C, requires_grad=True)
+
+        return wQ, wK, wV
+
+
 class BigramLanguageModel(nn.Module):
     
     def __init__(self, vocab_size):
@@ -83,6 +128,7 @@ class BigramLanguageModel(nn.Module):
         # each token directly reads off the logits for the next token from a lookup table
         self.token_embedding_table = nn.Embedding(vocab_size, n_embed)
         self.position_embedding_table = nn.Embedding(block_size, n_embed)
+        self.transformer_block = TransformerBlock(n_embed)
         self.lm_head = nn.Linear(n_embed, vocab_size)
 
     def forward(self, idx, targets=None):
@@ -103,6 +149,8 @@ class BigramLanguageModel(nn.Module):
         position_embeddings = self.position_embedding_table(torch.arange(T, device = device)) # (T,C)
         # Add position and token embeddings together (broadcasted over batches)
         x = token_embeddings + position_embeddings # (B,T,C)
+        # Run through the transformer block
+        x = self.transformer_block(x) # (B,T,C)
         logits = self.lm_head(x) # (B,T,vocab_size)
         
         # Evaluate the loss (compare logits to the next character (targets))
@@ -142,7 +190,7 @@ def get_optimization_details(model):
 
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
 
-    lambda1 = lambda epoch: 0.65 ** epoch
+    lambda1 = lambda epoch: lr_decay ** epoch
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda1)
 
     return optimizer, scheduler
