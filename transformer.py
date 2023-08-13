@@ -56,7 +56,7 @@ def tokenize_data(filepath):
 def train_test_split(data, val_pct):
     """Train test split on the data."""
 
-    n = int(val_pct*len(data))
+    n = int((1-val_pct)*len(data))
     train_data = data[:n]
     val_data = data[n:]
 
@@ -65,7 +65,12 @@ def train_test_split(data, val_pct):
 
 def get_batch(split, train_data, val_data): # train or validation split
     """Generate a small batch of data from inputs x and targets y."""
-    data = train_data if split == 'train' else val_data
+    if split == "train":
+        data = train_data
+    elif split == "val":
+        data = val_data
+    else:
+        raise ValueError("split must be train or val")
     ix = torch.randint(len(data) - block_size, (batch_size,)) # batch_size random sequence starting points
     # print("Random starting points for each block: ", ix)
     x = torch.stack([data[i:i+block_size] for i in ix])
@@ -198,16 +203,18 @@ def get_optimization_details(model):
 
 
 def train(model, train_data, val_data):
+    """Train the model on the training data and evaluate on the validation data.
+    
+    Training gets a batch consisting of random starting points and the block size.
+    The modle uses a fixed set of iterations of generations per epoch and caclulates the
+    train and validation loss at the end of each epoch."""
+
+    # Set number of batches to randomly generate for each epoch
+    train_num_batches = 10000
+    val_num_batches = 1000
 
     # Set up the model and optimizer
-    
-    batch_starts = np.arange(0, len(train_data)-batch_size, batch_size)
-    batch_starts_val = np.arange(0, len(val_data)-batch_size, batch_size)
-
     optimizer, scheduler = get_optimization_details(model)
-
-    # Note we use math.ceil for cases where the data to batch size division isn't a clean number
-    n_steps = math.ceil(len(train_data)/batch_size)
 
     # Iterate through epochs
     for epoch in range(num_epochs):
@@ -217,20 +224,20 @@ def train(model, train_data, val_data):
         model.train()
 
         # initialize tqdm object
-        progress_bar = tqdm(total=n_steps, desc=f"Epoch {epoch+1}/{num_epochs}")
+        progress_bar = tqdm(total=train_num_batches, desc=f"Epoch {epoch+1}/{num_epochs}")
 
         batch_losses = []
         
         # Iterate through batches
-        for batch_start in batch_starts:
-            xb, yb = get_batch(train_data[batch_start:], train_data, val_data)
+        for _ in range(train_num_batches):
+            xb, yb = get_batch("train", train_data, val_data)
             xb = xb.to(device)
             yb = yb.to(device)
-            # forward pass 
+            # forward pass
             logits, loss = model(xb, yb)
-            
+
             batch_losses.append(loss.item())
-            
+
             # update progress bar
             progress_bar.update(1)
             progress_bar.set_postfix(loss=loss.item(), lr=optimizer.param_groups[0]['lr'])
@@ -246,13 +253,28 @@ def train(model, train_data, val_data):
         # Update learning rate
         scheduler.step()
 
-        # TODO: add in a batch eval process here
-        model.eval()
+        # Calculate the validation loss once per epoch
+
+        with torch.no_grad():
+            model.eval()
+            val_batch_losses = []
+            # Iterate through batches
+            for _ in range(val_num_batches):
+                xb, yb = get_batch("val", train_data, val_data)
+                xb = xb.to(device)
+                yb = yb.to(device)
+                # forward pass
+                logits, loss = model(xb, yb)
+
+                val_batch_losses.append(loss.item())
+
+            val_total_loss = sum(val_batch_losses)/len(val_batch_losses)
+
               
         # Print out training loop stats
         end_time = time.time()
         epoch_time = end_time - start_time
-        print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {total_loss:.4f}, Execution time: {epoch_time:.4f}")
+        print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {total_loss:.4f}, Val Loss: {val_total_loss:.4f}, Execution time: {epoch_time:.4f}")
         progress_bar.close()
 
 def main():
@@ -265,6 +287,7 @@ def main():
     model = BigramLanguageModel(vocab_size).to(device)
 
     train_data, val_data = train_test_split(data, val_pct)
+    print("Train/Val data len: ", len(train_data), len(val_data))
 
     train(model, train_data, val_data)
 
