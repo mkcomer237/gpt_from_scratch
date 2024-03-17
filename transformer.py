@@ -95,16 +95,18 @@ class TransformerBlock(nn.Module):
         
         :param X: pytorch tensor with dims (B, T, C) or (T, C)
         """
-        
+
         B, T, C = X.shape
 
         # Create the query, key, and value matrices
+        # Weights are CxC - the embedding dim dimension
         Q = self.query(X)
         K = self.key(X)
         V = self.value(X)
 
         # Take the dot product with each previous matrix
-        
+        # Q is of shape (B, T, C) and KT is of shape (B, C, T)
+        # Pytorch broadcasting does the the TxC dot CxT matrix multiplication for each batch in dim B
         xdot = (Q @ torch.transpose(K, -2, -1)).masked_fill(self.tril[:T, :T] == 0, float('-inf'))
         
         # Normalize by the square root of the input dim
@@ -145,11 +147,9 @@ class BigramLanguageModel(nn.Module):
         are just the predictions.  So the model is taking each character and determining what
         the most likely next character is, trained on the offset by one x and y values."""
         # idx and targets are both (B, T) tensor of integers
-        # We are ONLY using the embedding as the logits directly.  
-
         B, T = idx.shape
 
-        # Add a linear layer to go from togken embeddings to logist now
+        # Add a linear layer to go from token embeddings to logits now
         token_embeddings = self.token_embedding_table(idx)  # (B,T,C) - (Batch (4), Time (8), Channel(n_embed))
         position_embeddings = self.position_embedding_table(torch.arange(T, device = device)) # (T,C)
         # Add position and token embeddings together (broadcasted over batches)
@@ -157,7 +157,7 @@ class BigramLanguageModel(nn.Module):
         # Run through the transformer block
         x = self.transformer_block(x) # (B,T,C)
         logits = self.lm_head(x) # (B,T,vocab_size)
-        
+
         # Evaluate the loss (compare logits to the next character (targets))
         if targets == None:
             loss = None
@@ -166,7 +166,7 @@ class BigramLanguageModel(nn.Module):
             logits = logits.view(B * T, C)  # Stack the time pieces for each batch on top of each other batch
             targets = targets.view(B * T)
             loss = F.cross_entropy(logits, targets)
-        
+
         return logits, loss
     
     def generate(self, idx, max_new_tokens):
@@ -206,7 +206,7 @@ def train(model, train_data, val_data):
     """Train the model on the training data and evaluate on the validation data.
     
     Training gets a batch consisting of random starting points and the block size.
-    The modle uses a fixed set of iterations of generations per epoch and caclulates the
+    The model uses a fixed set of iterations of generations per epoch and caclulates the
     train and validation loss at the end of each epoch."""
 
     # Set number of batches to randomly generate for each epoch
@@ -298,4 +298,3 @@ def main():
 if __name__ == "__main__":
     """ This is executed when run from the command line."""
     main()
-
