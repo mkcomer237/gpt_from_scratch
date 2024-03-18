@@ -3,3 +3,4 @@
 .pytorch_venv/*
 .DS_Store
 .vscode/
+.linux_venv/*

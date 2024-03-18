@@ -14,18 +14,20 @@ import math
 torch.manual_seed(1337)
 # Larger batch size is faster (when using gpu at least)
 val_pct = 0.1
-batch_size = 64 # Number of independent sequences yt process in parallel
-block_size = 16 # Maximum context length for the predictions 
-learning_rate = 0.00002
-lr_decay = 0.75
-num_epochs = 12
-device = "cpu" # cuda, mps, or cpu
-n_embed = 32
-
+batch_size = 1024 # Number of independent sequences yt process in parallel
+block_size = 64 # Maximum context length for the predictions 
+# Set number of batches to randomly generate for each epoch
+train_num_batches = int(10000*64/batch_size)
+val_num_batches = int(1000*64/batch_size)
+learning_rate = 0.00006
+lr_decay = 0.95
+num_epochs = 50
+device = "cuda" # cuda, mps, or cpu
+n_embed = 64
 
 torch.manual_seed(1337)
-batch_size = 4  # Number of independent sequences yt process in parallel
-block_size = 8  # Maximum context length for the predictions 
+# batch_size = 4  # Number of independent sequences yt process in parallel
+# block_size = 8  # Maximum context length for the predictions 
 
 
 # Simple encoder and decoder functions
@@ -78,15 +80,17 @@ def get_batch(split, train_data, val_data): # train or validation split
     return x, y
 
 
-class TransformerBlock(nn.Module):
+class Head(nn.Module):
     """Transformer block."""
-    def __init__(self, n_embed):
+    def __init__(self, head_size):
         super().__init__()
         self.wQ, self.wK, self.wV = self.initialize_weights(n_embed)
 
-        self.query = nn.Linear(n_embed, n_embed, bias=False)
-        self.key = nn.Linear(n_embed, n_embed, bias=False)
-        self.value = nn.Linear(n_embed, n_embed, bias=False)
+        # The head_size is the dimension after the linear transformation
+        # It does not need to be the same as n_embed, it just needs to be consistent
+        self.query = nn.Linear(n_embed, head_size, bias=False)
+        self.key = nn.Linear(n_embed, head_size, bias=False)
+        self.value = nn.Linear(n_embed, head_size, bias=False)
 
         self.register_buffer('tril', torch.tril(torch.ones((block_size, block_size))))
     
@@ -128,6 +132,18 @@ class TransformerBlock(nn.Module):
         return wQ, wK, wV
 
 
+class MultiHeadAttention(nn.Module):
+    """Multiple heads of attention in parallel."""
+
+    def __init__(self, num_heads, head_size):
+        super().__init__()
+        self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
+
+    def forward(self, x):
+        # Run all of the heads in parallel and concatenate the results over the C dimension
+        return torch.cat([h(x) for h in self.heads], dim=-1)
+
+
 class BigramLanguageModel(nn.Module):
     
     def __init__(self, vocab_size):
@@ -135,7 +151,10 @@ class BigramLanguageModel(nn.Module):
         # each token directly reads off the logits for the next token from a lookup table
         self.token_embedding_table = nn.Embedding(vocab_size, n_embed)
         self.position_embedding_table = nn.Embedding(block_size, n_embed)
-        self.transformer_block = TransformerBlock(n_embed)
+        # For now we're using n_embed for the head_size, but it can project down to a smaller dim
+        # For multi head, we split the original embedding into different channels, and use them independently
+        # Because we are dividing by the number of heads, the concantenated output will have the same size as the input
+        self.multi_attention_block = MultiHeadAttention(4, n_embed//4) # 4 heads, each with n_embed/4 size
         self.lm_head = nn.Linear(n_embed, vocab_size)
 
     def forward(self, idx, targets=None):
@@ -150,12 +169,13 @@ class BigramLanguageModel(nn.Module):
         B, T = idx.shape
 
         # Add a linear layer to go from token embeddings to logits now
+        # This takes in an existing (B, T) shape set of indicies and gets their embeddings
         token_embeddings = self.token_embedding_table(idx)  # (B,T,C) - (Batch (4), Time (8), Channel(n_embed))
         position_embeddings = self.position_embedding_table(torch.arange(T, device = device)) # (T,C)
         # Add position and token embeddings together (broadcasted over batches)
         x = token_embeddings + position_embeddings # (B,T,C)
         # Run through the transformer block
-        x = self.transformer_block(x) # (B,T,C)
+        x = self.multi_attention_block(x) # (B,T,C)
         logits = self.lm_head(x) # (B,T,vocab_size)
 
         # Evaluate the loss (compare logits to the next character (targets))
@@ -201,7 +221,6 @@ def get_optimization_details(model):
     return optimizer, scheduler
 
 
-
 def train(model, train_data, val_data):
     """Train the model on the training data and evaluate on the validation data.
     
@@ -209,9 +228,6 @@ def train(model, train_data, val_data):
     The model uses a fixed set of iterations of generations per epoch and caclulates the
     train and validation loss at the end of each epoch."""
 
-    # Set number of batches to randomly generate for each epoch
-    train_num_batches = 10000
-    val_num_batches = 1000
 
     # Set up the model and optimizer
     optimizer, scheduler = get_optimization_details(model)
