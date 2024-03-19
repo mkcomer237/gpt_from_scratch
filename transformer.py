@@ -21,7 +21,7 @@ train_num_batches = int(10000*64/batch_size)
 val_num_batches = int(1000*64/batch_size)
 learning_rate = 0.00006
 lr_decay = 0.95
-num_epochs = 50
+num_epochs = 20
 device = "cuda" # cuda, mps, or cpu
 n_embed = 64
 
@@ -159,6 +159,27 @@ class FeedForward(nn.Module):
     def forward(self, x):
         return self.net(x)
 
+class TransformerBlock(nn.Module):
+    """Combine ff and attention layers in a single repeatable block."""
+    def __init__(self, n_head=4):
+        super().__init__()
+        # For now we're using n_embed for the head_size, but it can project down to a smaller dim
+        # For multi head, we split the original embedding into different channels, and use them independently
+        # Because we are dividing by the number of heads, the concantenated output will have the same size as the input
+        head_size = n_embed // n_head
+        self.multi_attention_block = MultiHeadAttention(n_head, head_size) # 4 heads, each with n_embed/4 size
+        self.ffwd = FeedForward(n_embed)
+
+
+    def forward(self, x):
+
+        # Run through the multi attention step
+        x = self.multi_attention_block(x) # (B,T,C)
+        # Feed forward layer that is applied individually for each token - so a linear transformation of the
+        # output embedding
+        x = self.ffwd(x) # (B,T,C)
+        return x
+
 
 class BigramLanguageModel(nn.Module):
     
@@ -167,11 +188,11 @@ class BigramLanguageModel(nn.Module):
         # each token directly reads off the logits for the next token from a lookup table
         self.token_embedding_table = nn.Embedding(vocab_size, n_embed)
         self.position_embedding_table = nn.Embedding(block_size, n_embed)
-        # For now we're using n_embed for the head_size, but it can project down to a smaller dim
-        # For multi head, we split the original embedding into different channels, and use them independently
-        # Because we are dividing by the number of heads, the concantenated output will have the same size as the input
-        self.multi_attention_block = MultiHeadAttention(4, n_embed//4) # 4 heads, each with n_embed/4 size
-        self.ffwd = FeedForward(n_embed)
+        self.transformer_blocks = nn.Sequential(
+            TransformerBlock(),
+            TransformerBlock(),
+            TransformerBlock(),
+        )
         self.lm_head = nn.Linear(n_embed, vocab_size)
 
     def forward(self, idx, targets=None):
@@ -189,13 +210,9 @@ class BigramLanguageModel(nn.Module):
         # This takes in an existing (B, T) shape set of indicies and gets their embeddings
         token_embeddings = self.token_embedding_table(idx)  # (B,T,C) - (Batch (4), Time (8), Channel(n_embed))
         position_embeddings = self.position_embedding_table(torch.arange(T, device = device)) # (T,C)
-        # Add position and token embeddings together (broadcasted over batches)
-        x = token_embeddings + position_embeddings # (B,T,C)
-        # Run through the transformer block
-        x = self.multi_attention_block(x) # (B,T,C)
-        # Feed forward layer that is applied individually for each token - so a linear transformation of the 
-        # output embedding
-        x = self.ffwd(x) # (B,T,C)
+        position_adjusted_embeddings = token_embeddings + position_embeddings # (B,T,C) broadcasted
+        # Pass the embeddings through the set of transformer blocks - the main part of this
+        x = self.transformer_blocks(position_adjusted_embeddings) # (B,T,C)
         logits = self.lm_head(x) # (B,T,vocab_size)
 
         # Evaluate the loss (compare logits to the next character (targets))
@@ -329,7 +346,7 @@ def main():
 
     # Use the (currently untrained) model to generate new characters
     idx = torch.tensor([[51, 39, 62, 0]]).to(device)
-    print(decode(model.generate(idx, 200)[0].tolist(), itos))
+    print(decode(model.generate(idx, 500)[0].tolist(), itos))
 
 if __name__ == "__main__":
     """ This is executed when run from the command line."""
