@@ -1,6 +1,7 @@
 """Bigram Model."""
 
 
+from logging import config
 import torch  
 import torch.nn as nn
 from torch.nn import functional as F
@@ -9,25 +10,7 @@ import numpy as np
 import time
 from tqdm import tqdm
 import math
-
-
-torch.manual_seed(1337)
-# Larger batch size is faster (when using gpu at least)
-val_pct = 0.1
-batch_size = 1024 # Number of independent sequences yt process in parallel
-block_size = 64 # Maximum context length for the predictions 
-# Set number of batches to randomly generate for each epoch
-train_num_batches = int(10000*64/batch_size)
-val_num_batches = int(1000*64/batch_size)
-learning_rate = 0.00006
-lr_decay = 0.95
-num_epochs = 20
-device = "cuda" # cuda, mps, or cpu
-n_embed = 64
-
-torch.manual_seed(1337)
-# batch_size = 4  # Number of independent sequences yt process in parallel
-# block_size = 8  # Maximum context length for the predictions 
+import json
 
 
 # Simple encoder and decoder functions
@@ -65,7 +48,7 @@ def train_test_split(data, val_pct):
     return train_data, val_data
 
 
-def get_batch(split, train_data, val_data): # train or validation split
+def get_batch(split, train_data, val_data, config): # train or validation split
     """Generate a small batch of data from inputs x and targets y."""
     if split == "train":
         data = train_data
@@ -73,24 +56,24 @@ def get_batch(split, train_data, val_data): # train or validation split
         data = val_data
     else:
         raise ValueError("split must be train or val")
-    ix = torch.randint(len(data) - block_size, (batch_size,)) # batch_size random sequence starting points
+    ix = torch.randint(len(data) - config["block_size"], (config["batch_size"],)) # batch_size random sequence starting points
     # print("Random starting points for each block: ", ix)
-    x = torch.stack([data[i:i+block_size] for i in ix])
-    y = torch.stack([data[i+1:i+1+block_size] for i in ix])
+    x = torch.stack([data[i:i+config["block_size"]] for i in ix])
+    y = torch.stack([data[i+1:i+1+config["block_size"]] for i in ix])
     return x, y
 
 
 class Head(nn.Module):
     """Transformer block."""
-    def __init__(self, head_size):
+    def __init__(self, head_size, n_embd, block_size):
         super().__init__()
-        self.wQ, self.wK, self.wV = self.initialize_weights(n_embed)
+        self.wQ, self.wK, self.wV = self.initialize_weights(n_embd)
 
         # The head_size is the dimension after the linear transformation
         # It does not need to be the same as n_embed, it just needs to be consistent
-        self.query = nn.Linear(n_embed, head_size, bias=False)
-        self.key = nn.Linear(n_embed, head_size, bias=False)
-        self.value = nn.Linear(n_embed, head_size, bias=False)
+        self.query = nn.Linear(n_embd, head_size, bias=False)
+        self.key = nn.Linear(n_embd, head_size, bias=False)
+        self.value = nn.Linear(n_embd, head_size, bias=False)
 
         self.register_buffer('tril', torch.tril(torch.ones((block_size, block_size))))
     
@@ -135,9 +118,9 @@ class Head(nn.Module):
 class MultiHeadAttention(nn.Module):
     """Multiple heads of attention in parallel."""
 
-    def __init__(self, num_heads, head_size):
+    def __init__(self, num_heads, head_size, n_embd, block_size):
         super().__init__()
-        self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
+        self.heads = nn.ModuleList([Head(head_size, n_embd, block_size) for _ in range(num_heads)])
 
     def forward(self, x):
         # Run all of the heads in parallel and concatenate the results over the C dimension
@@ -161,14 +144,14 @@ class FeedForward(nn.Module):
 
 class TransformerBlock(nn.Module):
     """Combine ff and attention layers in a single repeatable block."""
-    def __init__(self, n_head=4):
+    def __init__(self, n_embd, block_size, n_head=4):
         super().__init__()
         # For now we're using n_embed for the head_size, but it can project down to a smaller dim
         # For multi head, we split the original embedding into different channels, and use them independently
         # Because we are dividing by the number of heads, the concantenated output will have the same size as the input
-        head_size = n_embed // n_head
-        self.multi_attention_block = MultiHeadAttention(n_head, head_size) # 4 heads, each with n_embed/4 size
-        self.ffwd = FeedForward(n_embed)
+        head_size = n_embd // n_head
+        self.multi_attention_block = MultiHeadAttention(n_head, head_size, n_embd, block_size) # 4 heads, each with n_embd/4 size
+        self.ffwd = FeedForward(n_embd)
 
 
     def forward(self, x):
@@ -183,17 +166,22 @@ class TransformerBlock(nn.Module):
 
 class BigramLanguageModel(nn.Module):
     
-    def __init__(self, vocab_size):
+    def __init__(self, vocab_size, config, device):
         super().__init__()
         # each token directly reads off the logits for the next token from a lookup table
-        self.token_embedding_table = nn.Embedding(vocab_size, n_embed)
-        self.position_embedding_table = nn.Embedding(block_size, n_embed)
+        self.vocab_size = vocab_size
+        self.n_embd = config["n_embd"]
+        self.block_size = config["block_size"]
+        self.device = device
+
+        self.token_embedding_table = nn.Embedding(vocab_size, self.n_embd)
+        self.position_embedding_table = nn.Embedding(self.block_size, self.n_embd)
         self.transformer_blocks = nn.Sequential(
-            TransformerBlock(),
-            TransformerBlock(),
-            TransformerBlock(),
+            TransformerBlock(self.n_embd, self.block_size),
+            TransformerBlock(self.n_embd, self.block_size),
+            TransformerBlock(self.n_embd, self.block_size),
         )
-        self.lm_head = nn.Linear(n_embed, vocab_size)
+        self.lm_head = nn.Linear(self.n_embd, vocab_size)
 
     def forward(self, idx, targets=None):
         """ Forward pass. 
@@ -209,7 +197,7 @@ class BigramLanguageModel(nn.Module):
         # Add a linear layer to go from token embeddings to logits now
         # This takes in an existing (B, T) shape set of indicies and gets their embeddings
         token_embeddings = self.token_embedding_table(idx)  # (B,T,C) - (Batch (4), Time (8), Channel(n_embed))
-        position_embeddings = self.position_embedding_table(torch.arange(T, device = device)) # (T,C)
+        position_embeddings = self.position_embedding_table(torch.arange(T, device = self.device)) # (T,C)
         position_adjusted_embeddings = token_embeddings + position_embeddings # (B,T,C) broadcasted
         # Pass the embeddings through the set of transformer blocks - the main part of this
         x = self.transformer_blocks(position_adjusted_embeddings) # (B,T,C)
@@ -219,8 +207,8 @@ class BigramLanguageModel(nn.Module):
         if targets == None:
             loss = None
         else: 
-            B, T, C = logits.shape
-            logits = logits.view(B * T, C)  # Stack the time pieces for each batch on top of each other batch
+            B, T, V = logits.shape
+            logits = logits.view(B * T, V)  # Stack the time pieces for each batch on top of each other batch
             targets = targets.view(B * T)
             loss = F.cross_entropy(logits, targets)
 
@@ -241,24 +229,24 @@ class BigramLanguageModel(nn.Module):
             # append sampled index to the running sequence
             idx = torch.cat((idx, idx_next), dim=1) # (B, T+1)
             # Keep the maximum to the block size (for position encodings)
-            if idx.shape[1] > block_size:
-                idx = idx[:, -block_size:]
+            if idx.shape[1] > self.block_size:
+                idx = idx[:, -self.block_size:]
             idx_output = torch.cat((idx_output, idx_next), dim=1) # (B, T+1)
         
         return idx_output
 
 
-def get_optimization_details(model):
+def get_optimization_details(model, config):
 
-    optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+    optimizer = optim.AdamW(model.parameters(), lr=config["learning_rate"])
 
-    lambda1 = lambda epoch: lr_decay ** epoch
+    lambda1 = lambda epoch: config["lr_decay"] ** epoch
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda1)
 
     return optimizer, scheduler
 
 
-def train(model, train_data, val_data):
+def train(model, train_data, val_data, config, device, train_num_batches, val_num_batches):
     """Train the model on the training data and evaluate on the validation data.
     
     Training gets a batch consisting of random starting points and the block size.
@@ -267,7 +255,8 @@ def train(model, train_data, val_data):
 
 
     # Set up the model and optimizer
-    optimizer, scheduler = get_optimization_details(model)
+    optimizer, scheduler = get_optimization_details(model, config)
+    num_epochs = config["num_epochs"]
 
     # Iterate through epochs
     for epoch in range(num_epochs):
@@ -283,7 +272,7 @@ def train(model, train_data, val_data):
         
         # Iterate through batches
         for _ in range(train_num_batches):
-            xb, yb = get_batch("train", train_data, val_data)
+            xb, yb = get_batch("train", train_data, val_data, config)
             xb = xb.to(device)
             yb = yb.to(device)
             # forward pass
@@ -313,7 +302,7 @@ def train(model, train_data, val_data):
             val_batch_losses = []
             # Iterate through batches
             for _ in range(val_num_batches):
-                xb, yb = get_batch("val", train_data, val_data)
+                xb, yb = get_batch("val", train_data, val_data, config)
                 xb = xb.to(device)
                 yb = yb.to(device)
                 # forward pass
@@ -330,21 +319,40 @@ def train(model, train_data, val_data):
         print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {total_loss:.4f}, Val Loss: {val_total_loss:.4f}, Execution time: {epoch_time:.4f}")
         progress_bar.close()
 
+
+def set_parameters():
+
+    # Load the config file json
+    f = open("training_config.json")
+    config = json.load(f)
+    torch.manual_seed(1337)
+
+    train_num_batches = config["train_num_steps"] // config["batch_size"]
+    val_num_batches = config["val_num_steps"] // config["batch_size"]
+
+    if torch.cuda.is_available():
+        device = "cuda"
+    else:
+        device = "cpu"
+
+    return config, device, train_num_batches, val_num_batches
+
+
 def main():
     """ Main entry point of the app."""
 
+    config, device, train_num_batches, val_num_batches = set_parameters()
     data, vocab_size, stoi, itos = tokenize_data("input.txt")
-
     print(data[:100])
 
-    model = BigramLanguageModel(vocab_size).to(device)
 
-    train_data, val_data = train_test_split(data, val_pct)
+    model = BigramLanguageModel(vocab_size, config, device).to(device)
+    train_data, val_data = train_test_split(data, config["val_pct"])
     print("Train/Val data len: ", len(train_data), len(val_data))
 
-    train(model, train_data, val_data)
+    train(model, train_data, val_data, config, device, train_num_batches, val_num_batches)
 
-    # Use the (currently untrained) model to generate new characters
+    # Use the trained model to generate new characters
     idx = torch.tensor([[51, 39, 62, 0]]).to(device)
     print(decode(model.generate(idx, 500)[0].tolist(), itos))
 
