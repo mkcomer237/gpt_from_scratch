@@ -144,6 +144,22 @@ class MultiHeadAttention(nn.Module):
         return torch.cat([h(x) for h in self.heads], dim=-1)
 
 
+class FeedForward(nn.Module):
+    """A simple feed forward layer with non-linearity"""
+
+    def __init__(self, dim):
+        super().__init__()
+        self.net = nn.Sequential(
+            # This is very simple right now - just a single linear layer
+            # It is effectively using the embedding output
+            nn.Linear(dim, dim),
+            nn.ReLU()
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
 class BigramLanguageModel(nn.Module):
     
     def __init__(self, vocab_size):
@@ -155,6 +171,7 @@ class BigramLanguageModel(nn.Module):
         # For multi head, we split the original embedding into different channels, and use them independently
         # Because we are dividing by the number of heads, the concantenated output will have the same size as the input
         self.multi_attention_block = MultiHeadAttention(4, n_embed//4) # 4 heads, each with n_embed/4 size
+        self.ffwd = FeedForward(n_embed)
         self.lm_head = nn.Linear(n_embed, vocab_size)
 
     def forward(self, idx, targets=None):
@@ -176,6 +193,9 @@ class BigramLanguageModel(nn.Module):
         x = token_embeddings + position_embeddings # (B,T,C)
         # Run through the transformer block
         x = self.multi_attention_block(x) # (B,T,C)
+        # Feed forward layer that is applied individually for each token - so a linear transformation of the 
+        # output embedding
+        x = self.ffwd(x) # (B,T,C)
         logits = self.lm_head(x) # (B,T,vocab_size)
 
         # Evaluate the loss (compare logits to the next character (targets))
