@@ -112,11 +112,11 @@ class FeedForward(nn.Module):
     def forward(self, x):
         return self.net(x)
 
+
 class TransformerBlock(nn.Module):
     """Combine ff and attention layers in a single repeatable block."""
     def __init__(self, n_embd, block_size, n_head=4):
         super().__init__()
-        # For now we're using n_embed for the head_size, but it can project down to a smaller dim
         # For multi head, we split the original embedding into different channels, and use them independently
         # Because we are dividing by the number of heads, the concantenated output will have the same size as the input
         head_size = n_embd // n_head
@@ -127,10 +127,12 @@ class TransformerBlock(nn.Module):
     def forward(self, x):
 
         # Run through the multi attention step
-        x = self.multi_attention_block(x) # (B,T,C)
+        # Also add the original input to the output of the multi attention step for residual connection
+        x = x + self.multi_attention_block(x) # (B,T,C)
+
         # Feed forward layer that is applied individually for each token - so a linear transformation of the
         # output embedding
-        x = self.ffwd(x) # (B,T,C)
+        x = x + self.ffwd(x) # (B,T,C)
         return x
 
 
@@ -147,6 +149,7 @@ class TransformerLanguageModel(nn.Module):
         self.token_embedding_table = nn.Embedding(vocab_size, self.n_embd)
         self.position_embedding_table = nn.Embedding(self.block_size, self.n_embd)
         self.transformer_blocks = nn.Sequential(
+            TransformerBlock(self.n_embd, self.block_size),
             TransformerBlock(self.n_embd, self.block_size),
             TransformerBlock(self.n_embd, self.block_size),
             TransformerBlock(self.n_embd, self.block_size),
@@ -186,6 +189,7 @@ class TransformerLanguageModel(nn.Module):
     
     def generate(self, idx, max_new_tokens):
         """Generate new tokens on top of the existing T tokens."""
+        self.eval()
         idx_output = idx
         for _ in range(max_new_tokens):
             # get the predictions
@@ -202,5 +206,5 @@ class TransformerLanguageModel(nn.Module):
             if idx.shape[1] > self.block_size:
                 idx = idx[:, -self.block_size:]
             idx_output = torch.cat((idx_output, idx_next), dim=1) # (B, T+1)
-        
+        self.train()
         return idx_output

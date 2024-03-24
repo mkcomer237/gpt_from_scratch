@@ -14,9 +14,9 @@ import math
 torch.manual_seed(1337)
 # Larger batch size is faster (when using gpu at least)
 val_pct = 0.1
-batch_size = 128 # Number of independent sequences yt process in parallel
+batch_size = 256 # Number of independent sequences yt process in parallel
 block_size = 8 # Maximum context length for the predictions 
-learning_rate = 0.0003
+learning_rate = 0.001
 num_epochs = 3
 device = "cpu" # cuda, mps, or cpu
 n_embed = 32
