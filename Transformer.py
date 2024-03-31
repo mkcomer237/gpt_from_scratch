@@ -91,10 +91,12 @@ class MultiHeadAttention(nn.Module):
     def __init__(self, num_heads, head_size, n_embd, block_size):
         super().__init__()
         self.heads = nn.ModuleList([Head(head_size, n_embd, block_size) for _ in range(num_heads)])
+        self.projection = nn.Linear(n_embd, n_embd)
 
     def forward(self, x):
         # Run all of the heads in parallel and concatenate the results over the C dimension
-        return torch.cat([h(x) for h in self.heads], dim=-1)
+        out =  torch.cat([h(x) for h in self.heads], dim=-1)
+        return self.projection(out)
 
 
 class FeedForward(nn.Module):
@@ -107,6 +109,7 @@ class FeedForward(nn.Module):
             # It is effectively using the embedding output
             nn.Linear(dim, dim),
             nn.ReLU()
+            nn.Linear(dim, dim)
         )
 
     def forward(self, x):
