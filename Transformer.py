@@ -107,9 +107,9 @@ class FeedForward(nn.Module):
         self.net = nn.Sequential(
             # This is very simple right now - just a single linear layer
             # It is effectively using the embedding output
-            nn.Linear(dim, dim),
-            nn.ReLU()
-            nn.Linear(dim, dim)
+            nn.Linear(dim, 4 * dim),
+            nn.ReLU(),
+            nn.Linear(4 * dim, dim)
         )
 
     def forward(self, x):
