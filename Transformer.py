@@ -102,14 +102,15 @@ class MultiHeadAttention(nn.Module):
 class FeedForward(nn.Module):
     """A simple feed forward layer with non-linearity"""
 
-    def __init__(self, dim):
+    def __init__(self, dim, dropout):
         super().__init__()
         self.net = nn.Sequential(
             # This is very simple right now - just a single linear layer
             # It is effectively using the embedding output
             nn.Linear(dim, 4 * dim),
             nn.ReLU(),
-            nn.Linear(4 * dim, dim)
+            nn.Linear(4 * dim, dim),
+            nn.Dropout(dropout)
         )
 
     def forward(self, x):
@@ -118,13 +119,13 @@ class FeedForward(nn.Module):
 
 class TransformerBlock(nn.Module):
     """Combine feed forward and attention layers in a single repeatable block."""
-    def __init__(self, n_embd, block_size, n_head=4):
+    def __init__(self, n_embd, block_size, dropout, n_head=4):
         super().__init__()
         # For multi head, we split the original embedding into different channels, and use them independently
         # Because we are dividing by the number of heads, the concantenated output will have the same size as the input
         head_size = n_embd // n_head
         self.multi_attention_block = MultiHeadAttention(n_head, head_size, n_embd, block_size) # 4 heads, each with n_embd/4 size
-        self.ffwd = FeedForward(n_embd)
+        self.ffwd = FeedForward(n_embd, dropout)
         # Layer norm to be applied before self attention and ffwd
         self.ln1 = nn.LayerNorm(n_embd)
         self.ln2 = nn.LayerNorm(n_embd)
@@ -150,16 +151,17 @@ class TransformerLanguageModel(nn.Module):
         self.vocab_size = vocab_size
         self.n_embd = config["n_embd"]
         self.block_size = config["block_size"]
+        self.dropout = config["ffwd_dropout"]
         self.device = device
 
         self.token_embedding_table = nn.Embedding(vocab_size, self.n_embd)
         self.position_embedding_table = nn.Embedding(self.block_size, self.n_embd)
         self.transformer_blocks = nn.Sequential(
-            TransformerBlock(self.n_embd, self.block_size),
-            TransformerBlock(self.n_embd, self.block_size),
-            TransformerBlock(self.n_embd, self.block_size),
-            TransformerBlock(self.n_embd, self.block_size),
-            nn.Layernorm(self.n_embd)
+            TransformerBlock(self.n_embd, self.block_size, self.dropout),
+            TransformerBlock(self.n_embd, self.block_size, self.dropout),
+            TransformerBlock(self.n_embd, self.block_size, self.dropout),
+            TransformerBlock(self.n_embd, self.block_size, self.dropout),
+            nn.LayerNorm(self.n_embd)
         )
         self.lm_head = nn.Linear(self.n_embd, vocab_size)
 

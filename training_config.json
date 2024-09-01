@@ -7,5 +7,6 @@
     "learning_rate": 0.000003,
     "lr_decay": 0.95,
     "num_epochs": 15,
-    "n_embd": 128
+    "n_embd": 128,
+    "ffwd_dropout": 0.3
 }
