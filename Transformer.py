@@ -35,7 +35,7 @@ def tokenize_data(filepath):
 
 class Head(nn.Module):
     """Basic attention head."""
-    def __init__(self, head_size, n_embd, block_size):
+    def __init__(self, head_size, n_embd, block_size, dropout):
         super().__init__()
         self.wQ, self.wK, self.wV = self.initialize_weights(n_embd)
 
@@ -46,6 +46,7 @@ class Head(nn.Module):
         self.value = nn.Linear(n_embd, head_size, bias=False)
 
         self.register_buffer('tril', torch.tril(torch.ones((block_size, block_size))))
+        self.dropout = nn.Dropout(dropout)
     
     def forward(self, X):
         """Take in a 2 or 3d tensor and calculate output embeddings.
@@ -71,6 +72,7 @@ class Head(nn.Module):
         
         # Softmax to get weights of each previous element 
         alpha = F.softmax(xdot, dim=1)
+        alpha = self.dropout(alpha)
         
         # Multiply by X again to get a matrix with Y (each row is dim C)
         Y = alpha @ V
@@ -88,15 +90,17 @@ class Head(nn.Module):
 class MultiHeadAttention(nn.Module):
     """Multiple heads of attention in parallel."""
 
-    def __init__(self, num_heads, head_size, n_embd, block_size):
+    def __init__(self, num_heads, head_size, n_embd, block_size, dropout):
         super().__init__()
-        self.heads = nn.ModuleList([Head(head_size, n_embd, block_size) for _ in range(num_heads)])
+        self.heads = nn.ModuleList([Head(head_size, n_embd, block_size, dropout) for _ in range(num_heads)])
         self.projection = nn.Linear(n_embd, n_embd)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
         # Run all of the heads in parallel and concatenate the results over the C dimension
         out =  torch.cat([h(x) for h in self.heads], dim=-1)
-        return self.projection(out)
+        out = self.dropout(self.projection(out))
+        return out
 
 
 class FeedForward(nn.Module):
@@ -119,20 +123,19 @@ class FeedForward(nn.Module):
 
 class TransformerBlock(nn.Module):
     """Combine feed forward and attention layers in a single repeatable block."""
-    def __init__(self, n_embd, block_size, dropout, n_head=4):
+    def __init__(self, n_embd, block_size, config, n_head=4):
         super().__init__()
         # For multi head, we split the original embedding into different channels, and use them independently
         # Because we are dividing by the number of heads, the concantenated output will have the same size as the input
         head_size = n_embd // n_head
-        self.multi_attention_block = MultiHeadAttention(n_head, head_size, n_embd, block_size) # 4 heads, each with n_embd/4 size
-        self.ffwd = FeedForward(n_embd, dropout)
+        self.multi_attention_block = MultiHeadAttention(n_head, head_size, n_embd, block_size, config["mha_dropout"]) # 4 heads, each with n_embd/4 size
+        self.ffwd = FeedForward(n_embd, config["ffwd_dropout"])
         # Layer norm to be applied before self attention and ffwd
         self.ln1 = nn.LayerNorm(n_embd)
         self.ln2 = nn.LayerNorm(n_embd)
 
 
     def forward(self, x):
-
         # Run through the multi attention step
         # Also add the original input to the output of the multi attention step for residual connection
         x = x + self.multi_attention_block(self.ln1(x)) # (B,T,C)
@@ -151,16 +154,16 @@ class TransformerLanguageModel(nn.Module):
         self.vocab_size = vocab_size
         self.n_embd = config["n_embd"]
         self.block_size = config["block_size"]
-        self.dropout = config["ffwd_dropout"]
+        
         self.device = device
 
         self.token_embedding_table = nn.Embedding(vocab_size, self.n_embd)
         self.position_embedding_table = nn.Embedding(self.block_size, self.n_embd)
         self.transformer_blocks = nn.Sequential(
-            TransformerBlock(self.n_embd, self.block_size, self.dropout),
-            TransformerBlock(self.n_embd, self.block_size, self.dropout),
-            TransformerBlock(self.n_embd, self.block_size, self.dropout),
-            TransformerBlock(self.n_embd, self.block_size, self.dropout),
+            TransformerBlock(self.n_embd, self.block_size, config),
+            TransformerBlock(self.n_embd, self.block_size, config),
+            TransformerBlock(self.n_embd, self.block_size, config),
+            TransformerBlock(self.n_embd, self.block_size, config),
             nn.LayerNorm(self.n_embd)
         )
         self.lm_head = nn.Linear(self.n_embd, vocab_size)

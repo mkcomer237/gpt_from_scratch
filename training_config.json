@@ -4,9 +4,10 @@
     "block_size": 64,
     "train_num_steps": 640000,
     "val_num_steps": 64000,
-    "learning_rate": 0.000003,
+    "learning_rate": 0.000006,
     "lr_decay": 0.95,
     "num_epochs": 15,
     "n_embd": 128,
-    "ffwd_dropout": 0.3
+    "ffwd_dropout": 0.3,
+    "mha_dropout": 0.3
 }
