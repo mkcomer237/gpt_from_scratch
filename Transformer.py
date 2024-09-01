@@ -117,7 +117,7 @@ class FeedForward(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    """Combine ff and attention layers in a single repeatable block."""
+    """Combine feed forward and attention layers in a single repeatable block."""
     def __init__(self, n_embd, block_size, n_head=4):
         super().__init__()
         # For multi head, we split the original embedding into different channels, and use them independently
@@ -125,17 +125,20 @@ class TransformerBlock(nn.Module):
         head_size = n_embd // n_head
         self.multi_attention_block = MultiHeadAttention(n_head, head_size, n_embd, block_size) # 4 heads, each with n_embd/4 size
         self.ffwd = FeedForward(n_embd)
+        # Layer norm to be applied before self attention and ffwd
+        self.ln1 = nn.LayerNorm(n_embd)
+        self.ln2 = nn.LayerNorm(n_embd)
 
 
     def forward(self, x):
 
         # Run through the multi attention step
         # Also add the original input to the output of the multi attention step for residual connection
-        x = x + self.multi_attention_block(x) # (B,T,C)
+        x = x + self.multi_attention_block(self.ln1(x)) # (B,T,C)
 
-        # Feed forward layer that is applied individually for each token - so a linear transformation of the
-        # output embedding
-        x = x + self.ffwd(x) # (B,T,C)
+        # Feed forward layer that is applied individually for each token - so a linear transformation of the output embedding
+        # Residual connections are implemented by adding the original input to the output of the feed forward layer
+        x = x + self.ffwd(self.ln2(x)) # (B,T,C)
         return x
 
 
@@ -156,22 +159,26 @@ class TransformerLanguageModel(nn.Module):
             TransformerBlock(self.n_embd, self.block_size),
             TransformerBlock(self.n_embd, self.block_size),
             TransformerBlock(self.n_embd, self.block_size),
+            nn.Layernorm(self.n_embd)
         )
         self.lm_head = nn.Linear(self.n_embd, vocab_size)
 
     def forward(self, idx, targets=None):
         """ Forward pass. 
         
-        This is an extremely simple model currently, where the embedding is used
-        directly as an input into softmax to create an array of probabilities.  So the 
-        embedding dimension must be equal to the vocab size since the emedding values itself
-        are just the predictions.  So the model is taking each character and determining what
-        the most likely next character is, trained on the offset by one x and y values."""
-        # idx and targets are both (B, T) tensor of integers
+        Input is an idx parameter of shape (B, T) for Batch, Time.
+        This input is used to access the already tokenized character level indicies that are integers
+        mapping each to a character. The forward pass then:
+        - Uses an embedding layer to look up embeddings for each character index
+        - Uses broadcasting to add the position embedding to each token embedding
+        - Sends the position adjusted embeddings through the transformer blocks
+        - Calculates the loss on the output of the transformer
+        """
+        # idx and targets are both (B, T) tensor of integers in the vocab
         B, T = idx.shape
 
         # Add a linear layer to go from token embeddings to logits now
-        # This takes in an existing (B, T) shape set of indicies and gets their embeddings
+        # This takes in an existing (B, T) shape set of vocab indicies and gets their embeddings
         token_embeddings = self.token_embedding_table(idx)  # (B,T,C) - (Batch (4), Time (8), Channel(n_embed))
         position_embeddings = self.position_embedding_table(torch.arange(T, device = self.device)) # (T,C)
         position_adjusted_embeddings = token_embeddings + position_embeddings # (B,T,C) broadcasted

@@ -5,3 +5,5 @@
 .vscode/
 .linux_venv/*
 __pycache__/
+.env
+chroma/

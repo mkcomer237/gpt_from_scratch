@@ -75,6 +75,8 @@ def train(model, train_data, val_data, config, device, train_num_batches, val_nu
         
         # Iterate through batches
         for _ in range(train_num_batches):
+            # Each batch is a (B, T) dim tensor of integers which are the tokenized characters
+            # So we we are feeding in the actual characters
             xb, yb = get_batch("train", train_data, val_data, config)
             xb = xb.to(device)
             yb = yb.to(device)
