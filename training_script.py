@@ -24,7 +24,7 @@ def train_test_split(data, val_pct):
     return train_data, val_data
 
 
-def get_batch(split, train_data, val_data, config): # train or validation split
+def get_batch(split, train_data, val_data, device, config): # train or validation split
     """Generate a small batch of data from inputs x and targets y."""
     if split == "train":
         data = train_data
@@ -36,6 +36,7 @@ def get_batch(split, train_data, val_data, config): # train or validation split
     # print("Random starting points for each block: ", ix)
     x = torch.stack([data[i:i+config["block_size"]] for i in ix])
     y = torch.stack([data[i+1:i+1+config["block_size"]] for i in ix])
+    x, y = x.to(device), y.to(device)
     return x, y
 
 
@@ -49,7 +50,7 @@ def get_optimization_details(model, config):
     return optimizer, scheduler
 
 
-def train(model, train_data, val_data, config, device, train_num_batches, val_num_batches):
+def train(model, train_data, val_data, config, device, train_num_batches, val_num_batches, itos):
     """Train the model on the training data and evaluate on the validation data.
     
     Training gets a batch consisting of random starting points and the block size.
@@ -77,9 +78,9 @@ def train(model, train_data, val_data, config, device, train_num_batches, val_nu
         for _ in range(train_num_batches):
             # Each batch is a (B, T) dim tensor of integers which are the tokenized characters
             # So we we are feeding in the actual characters
-            xb, yb = get_batch("train", train_data, val_data, config)
-            xb = xb.to(device)
-            yb = yb.to(device)
+            xb, yb = get_batch("train", train_data, val_data, device, config)
+
+            optimizer.zero_grad()
             # forward pass
             logits, loss = model(xb, yb)
 
@@ -155,10 +156,10 @@ def main():
     train_data, val_data = train_test_split(data, config["val_pct"])
     print("Train/Val data len: ", len(train_data), len(val_data))
 
-    train(model, train_data, val_data, config, device, train_num_batches, val_num_batches)
+    train(model, train_data, val_data, config, device, train_num_batches, val_num_batches, itos)
 
-    # Use the trained model to generate new characters
-    idx = torch.tensor([[51, 39, 62, 0]]).to(device)
+    # Use the trained model to generate new characters starting with newline
+    idx = torch.tensor([[0]]).to(device)
     print(decode(model.generate(idx, 500)[0].tolist(), itos))
 
 if __name__ == "__main__":
