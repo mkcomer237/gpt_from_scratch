@@ -32,19 +32,20 @@ def get_batch(split, train_data, val_data, device, config): # train or validatio
         data = val_data
     else:
         raise ValueError("split must be train or val")
-    ix = torch.randint(len(data) - config["block_size"], (config["batch_size"],)) # batch_size random sequence starting points
+    block_size = config["model_architecture"]["block_size"]
+    ix = torch.randint(len(data) - block_size, (block_size,)) # batch_size random sequence starting points
     # print("Random starting points for each block: ", ix)
-    x = torch.stack([data[i:i+config["block_size"]] for i in ix])
-    y = torch.stack([data[i+1:i+1+config["block_size"]] for i in ix])
+    x = torch.stack([data[i:i+block_size] for i in ix])
+    y = torch.stack([data[i+1:i+1+block_size] for i in ix])
     x, y = x.to(device), y.to(device)
     return x, y
 
 
 def get_optimization_details(model, config):
 
-    optimizer = optim.AdamW(model.parameters(), lr=config["learning_rate"])
+    optimizer = optim.AdamW(model.parameters(), lr=config["training_hyperparams"]["learning_rate"])
 
-    lambda1 = lambda epoch: config["lr_decay"] ** epoch
+    lambda1 = lambda epoch: config["training_hyperparams"]["lr_decay"] ** epoch
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda1)
 
     return optimizer, scheduler
@@ -60,7 +61,7 @@ def train(model, train_data, val_data, config, device, train_num_batches, val_nu
 
     # Set up the model and optimizer
     optimizer, scheduler = get_optimization_details(model, config)
-    num_epochs = config["num_epochs"]
+    num_epochs = config["training_hyperparams"]["num_epochs"]
 
     # Iterate through epochs
     for epoch in range(num_epochs):
@@ -131,8 +132,8 @@ def set_parameters():
     config = json.load(f)
     torch.manual_seed(1337)
 
-    train_num_batches = config["train_num_steps"] // config["batch_size"]
-    val_num_batches = config["val_num_steps"] // config["batch_size"]
+    train_num_batches = config["training_hyperparams"]["train_batches"]
+    val_num_batches = config["training_hyperparams"]["val_batches"]
 
     if torch.cuda.is_available():
         device = "cuda"
@@ -151,7 +152,7 @@ def main():
 
 
     model = TransformerLanguageModel(vocab_size, config, device).to(device)
-    train_data, val_data = train_test_split(data, config["val_pct"])
+    train_data, val_data = train_test_split(data, config["training_hyperparams"]["val_pct"])
     print("Train/Val data len: ", len(train_data), len(val_data))
 
     train(model, train_data, val_data, config, device, train_num_batches, val_num_batches, itos)

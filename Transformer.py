@@ -115,12 +115,14 @@ class TransformerBlock(nn.Module):
     """Combine feed forward and attention layers in a single repeatable block."""
     def __init__(self, n_embd, block_size, config):
         super().__init__()
-        n_head = config["n_head"]
+        n_head = config["model_architecture"]["n_head"]
         # For multi head, we split the original embedding into different channels, and use them independently
         # Because we are dividing by the number of heads, the concantenated output will have the same size as the input
         head_size = n_embd // n_head
-        self.multi_attention_block = MultiHeadAttention(n_head, head_size, n_embd, block_size, config["mha_dropout"]) # 4 heads, each with n_embd/4 size
-        self.ffwd = FeedForward(n_embd, config["ffwd_dropout"])
+        self.multi_attention_block = MultiHeadAttention(
+            n_head, head_size, n_embd, block_size, config["training_hyperparams"]["mha_dropout"]
+        ) # 4 heads, each with n_embd/4 size
+        self.ffwd = FeedForward(n_embd, config["training_hyperparams"]["ffwd_dropout"])
         # Layer norm to be applied before self attention and ffwd
         self.ln1 = nn.LayerNorm(n_embd)
         self.ln2 = nn.LayerNorm(n_embd)
@@ -143,15 +145,15 @@ class TransformerLanguageModel(nn.Module):
         super().__init__()
         # each token directly reads off the logits for the next token from a lookup table
         self.vocab_size = vocab_size
-        self.n_embd = config["n_embd"]
-        self.block_size = config["block_size"]
+        self.n_embd = config["model_architecture"]["token_embed"]
+        self.block_size = config["model_architecture"]["block_size"]
         
         self.device = device
 
         self.token_embedding_table = nn.Embedding(vocab_size, self.n_embd)
         self.position_embedding_table = nn.Embedding(self.block_size, self.n_embd)
         self.transformer_blocks = nn.Sequential(
-            *[TransformerBlock(self.n_embd, self.block_size, config) for x in range(config["n_layer"])]
+            *[TransformerBlock(self.n_embd, self.block_size, config) for x in range(config["model_architecture"]["n_layer"])]
         )
         self.ln_f = nn.LayerNorm(self.n_embd) # final layer norm
         self.lm_head = nn.Linear(self.n_embd, vocab_size)
