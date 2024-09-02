@@ -83,7 +83,7 @@ class MultiHeadAttention(nn.Module):
     def __init__(self, num_heads, head_size, n_embd, block_size, dropout):
         super().__init__()
         self.heads = nn.ModuleList([Head(head_size, n_embd, block_size, dropout) for _ in range(num_heads)])
-        self.projection = nn.Linear(n_embd, n_embd)
+        self.projection = nn.Linear(head_size * num_heads, n_embd)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
@@ -185,8 +185,8 @@ class TransformerLanguageModel(nn.Module):
         if targets == None:
             loss = None
         else: 
-            B, T, V = logits.shape
-            logits = logits.view(B * T, V)  # Stack the time pieces for each batch on top of each other batch
+            B, T, C = logits.shape
+            logits = logits.view(B * T, C)  # Stack the time pieces for each batch on top of each other batch
             targets = targets.view(B * T)
             loss = F.cross_entropy(logits, targets)
 
