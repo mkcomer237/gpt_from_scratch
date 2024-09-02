@@ -108,23 +108,21 @@ def train(model, train_data, val_data, config, device, train_num_batches, val_nu
             val_batch_losses = []
             # Iterate through batches
             for _ in range(val_num_batches):
-                xb, yb = get_batch("val", train_data, val_data, config)
-                xb = xb.to(device)
-                yb = yb.to(device)
-                # forward pass
+                xb, yb = get_batch("val", train_data, val_data, device, config)
                 logits, loss = model(xb, yb)
-
                 val_batch_losses.append(loss.item())
-
             val_total_loss = sum(val_batch_losses)/len(val_batch_losses)
 
-              
         # Print out training loop stats
         end_time = time.time()
         epoch_time = end_time - start_time
         print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {total_loss:.4f}, Val Loss: {val_total_loss:.4f}, Execution time: {epoch_time:.4f}")
         progress_bar.close()
 
+        # Every 5 epochs print out some generated text
+        if epoch % 5 == 0:
+            idx = torch.tensor([[0]]).to(device)
+            print(decode(model.generate(idx, 300)[0].tolist(), itos))
 
 def set_parameters():
 
