@@ -1,13 +1,15 @@
 {
     "val_pct": 0.1,
-    "batch_size": 1024, 
-    "block_size": 64,
-    "train_num_steps": 640000,
-    "val_num_steps": 64000,
-    "learning_rate": 0.000006,
-    "lr_decay": 0.95,
-    "num_epochs": 15,
-    "n_embd": 128,
-    "ffwd_dropout": 0.3,
-    "mha_dropout": 0.3
+    "batch_size": 64,
+    "block_size": 256,
+    "train_num_steps": 5000,
+    "val_num_steps": 200,
+    "learning_rate": 0.0003,
+    "lr_decay": 1.0,
+    "num_epochs": 11,
+    "n_embd": 384,
+    "n_layer": 6,
+    "n_head": 6,
+    "ffwd_dropout": 0.2,
+    "mha_dropout": 0.2
 }

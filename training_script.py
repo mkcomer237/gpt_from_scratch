@@ -73,7 +73,7 @@ def train(model, train_data, val_data, config, device, train_num_batches, val_nu
         progress_bar = tqdm(total=train_num_batches, desc=f"Epoch {epoch+1}/{num_epochs}")
 
         batch_losses = []
-        
+        print("Train num batches:", train_num_batches)
         # Iterate through batches
         for _ in range(train_num_batches):
             # Each batch is a (B, T) dim tensor of integers which are the tokenized characters
@@ -161,5 +161,4 @@ def main():
     print(decode(model.generate(idx, 500)[0].tolist(), itos))
 
 if __name__ == "__main__":
-    """ This is executed when run from the command line."""
     main()
