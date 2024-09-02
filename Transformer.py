@@ -37,8 +37,6 @@ class Head(nn.Module):
     """Basic attention head."""
     def __init__(self, head_size, n_embd, block_size, dropout):
         super().__init__()
-        self.wQ, self.wK, self.wV = self.initialize_weights(n_embd)
-
         # The head_size is the dimension after the linear transformation
         # It does not need to be the same as n_embed, it just needs to be consistent
         self.query = nn.Linear(n_embd, head_size, bias=False)
@@ -71,20 +69,12 @@ class Head(nn.Module):
         xdot = xdot/math.sqrt(X.shape[-1])
         
         # Softmax to get weights of each previous element 
-        alpha = F.softmax(xdot, dim=1)
+        alpha = F.softmax(xdot, dim=-1)
         alpha = self.dropout(alpha)
         
         # Multiply by X again to get a matrix with Y (each row is dim C)
         Y = alpha @ V
         return Y
-
-    def initialize_weights(self, C):
-        """Create the traininable weight matrices for the query, key and value projections."""
-        wQ = torch.rand(C, C, requires_grad=True)
-        wK = torch.rand(C, C, requires_grad=True)
-        wV = torch.rand(C, C, requires_grad=True)
-
-        return wQ, wK, wV
 
 
 class MultiHeadAttention(nn.Module):
