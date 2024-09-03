@@ -157,5 +157,9 @@ def main():
     idx = torch.tensor([[0]]).to(device)
     print(decode(model.generate(idx, 500)[0].tolist(), itos))
 
+    # Save the model
+    PATH = "trained_shakespeare_model.pth"
+    torch.save(model.state_dict(), PATH)
+
 if __name__ == "__main__":
     main()
