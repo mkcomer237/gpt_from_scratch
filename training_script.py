@@ -33,7 +33,8 @@ def get_batch(split, train_data, val_data, device, config): # train or validatio
     else:
         raise ValueError("split must be train or val")
     block_size = config["model_architecture"]["block_size"]
-    ix = torch.randint(len(data) - block_size, (block_size,)) # batch_size random sequence starting points
+    batch_size = config["training_hyperparams"]["batch_size"]
+    ix = torch.randint(len(data) - block_size, (batch_size,)) # batch_size random sequence starting points
     # print("Random starting points for each block: ", ix)
     x = torch.stack([data[i:i+block_size] for i in ix])
     y = torch.stack([data[i+1:i+1+block_size] for i in ix])
@@ -84,7 +85,6 @@ def train(model, train_data, val_data, config, device, train_num_batches, val_nu
             optimizer.zero_grad()
             # forward pass
             logits, loss = model(xb, yb)
-
             batch_losses.append(loss.item())
 
             # update progress bar
@@ -93,10 +93,8 @@ def train(model, train_data, val_data, config, device, train_num_batches, val_nu
 
             # Backward pass 
             loss.backward()
-            
             # Update parameters
             optimizer.step()
-            
         total_loss = sum(batch_losses)/len(batch_losses)
         
         # Update learning rate
@@ -150,10 +148,8 @@ def main():
     data, vocab_size, stoi, itos = tokenize_data("input.txt")
     print(data[:100])
 
-
     model = TransformerLanguageModel(vocab_size, config, device).to(device)
     train_data, val_data = train_test_split(data, config["training_hyperparams"]["val_pct"])
-    print("Train/Val data len: ", len(train_data), len(val_data))
 
     train(model, train_data, val_data, config, device, train_num_batches, val_num_batches, itos)
 
