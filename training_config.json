@@ -1,19 +1,19 @@
 {
     "model_architecture": {
-        "token_embed": 128,
-        "n_layer": 4,
-        "n_head": 4,
-        "block_size": 256
+        "token_embed": 512,
+        "n_layer": 8,
+        "n_head": 8,
+        "block_size": 384
     },
     "training_hyperparams": {
         "val_pct": 0.1,
         "batch_size": 64,
-        "ffwd_dropout": 0.2,
-        "mha_dropout": 0.2,
+        "ffwd_dropout": 0.3,
+        "mha_dropout": 0.3,
         "train_batches": 200,
         "val_batches": 50,
         "learning_rate": 0.0004,
         "lr_decay": 0.98,
-        "num_epochs": 31
+        "num_epochs": 16
     }
 }
